@@ -47,7 +47,7 @@ interface SetRecordStatusInput {
  * ทางเดียวที่ team/admin เปลี่ยน recordStatus ได้ (นอกจาก self-delete ของ client)
  * เขียน recordStatus + database_edit_log แบบ atomic ในทรานแซกชันเดียวกันเสมอ
  */
-export const setRecordStatus = onCall<SetRecordStatusInput>(async (request) => {
+export const setRecordStatus = onCall<SetRecordStatusInput>({ region: "asia-southeast1" }, async (request) => {
   const auth = request.auth;
   if (!auth) throw new HttpsError("unauthenticated", "ต้อง login ก่อน");
 
@@ -139,7 +139,9 @@ export const logSelfDelete_chatSessions = makeSelfDeleteLogger("chat_sessions");
 // "jobs/{jobId}/boq_items/{docId}" แยกต่างหาก — ยังไม่ครอบคลุมในไฟล์นี้ (ทำ pattern เดียวกันได้)
 
 // ---------- Scheduled Function: Purge ตาม Retention Schedule (§1.5.5) ----------
-export const purgeExpiredRecords = onSchedule("every day 03:00", async () => {
+export const purgeExpiredRecords = onSchedule(
+  { schedule: "every day 03:00", timeZone: "Asia/Bangkok", region: "asia-southeast1" },
+  async () => {
   const now = Date.now();
   const REPAIR_GRACE_DAYS = 90;
   const CONSTRUCTION_GRACE_DAYS = 365;
