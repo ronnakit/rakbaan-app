@@ -1,3 +1,4 @@
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
@@ -7,42 +8,46 @@ import 'firebase_options.dart';
 import 'providers/chat_provider.dart';
 import 'providers/job_provider.dart';
 import 'providers/text_scale_provider.dart';
-import 'repositories/mock_job_repository.dart';
+import 'repositories/firestore_job_repository.dart';
+import 'repositories/job_repository.dart';
 import 'router/app_router.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
-  runApp(const RakBaanApp());
+
+  // Anonymous auth is a stand-in for real customer auth -- no phone-OTP
+  // login flow exists yet (rakbaan_md/07-technical-requirements.md §1.3).
+  // It's enough to satisfy firestore.rules' `request.auth != null` checks
+  // and gives a stable uid to key `jobs.customerId` off of.
+  final auth = FirebaseAuth.instance;
+  if (auth.currentUser == null) {
+    await auth.signInAnonymously();
+  }
+  final customerId = auth.currentUser!.uid;
+
+  runApp(RakBaanApp(customerId: customerId));
 }
 
 class RakBaanApp extends StatelessWidget {
-  const RakBaanApp({super.key});
+  const RakBaanApp({super.key, required this.customerId, this.jobRepository});
+
+  final String customerId;
+
+  /// Test-only override -- widget tests pump this app with no Firebase app
+  /// initialized, so they must not let this class construct a
+  /// [FirestoreJobRepository] itself (see test/widget_test.dart).
+  final JobRepository? jobRepository;
 
   @override
   Widget build(BuildContext context) {
     return MultiProvider(
       providers: [
         ChangeNotifierProvider(create: (_) => ChatProvider()),
-        // FirestoreJobRepository exists (lib/repositories/firestore_job_repository.dart)
-        // but is NOT wired in here yet -- `rakbaan-cnx` has no Firestore
-        // database provisioned yet (Cloud Firestore API has never been
-        // enabled on that project), so every call it makes would throw.
-        // Once that's done and firebase.json/functions are deployed, swap
-        // to it like this (no screen needs to change -- see JobRepository):
-        //
-        //   final auth = FirebaseAuth.instance;
-        //   if (auth.currentUser == null) await auth.signInAnonymously();
-        //   ...
-        //   create: (_) => JobProvider(
-        //     repository: FirestoreJobRepository(customerId: auth.currentUser!.uid),
-        //   ),
-        //
-        // (signInAnonymously is a stand-in for real customer auth -- no
-        // phone-OTP login flow exists yet, see
-        // rakbaan_md/07-technical-requirements.md §1.3.)
         ChangeNotifierProvider(
-          create: (_) => JobProvider(repository: MockJobRepository()),
+          create: (_) => JobProvider(
+            repository: jobRepository ?? FirestoreJobRepository(customerId: customerId),
+          ),
         ),
         ChangeNotifierProvider(create: (_) => TextScaleProvider()),
       ],

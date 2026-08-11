@@ -10,7 +10,13 @@ service cloud.firestore {
 
     function role() {
       // custom claim ต้องตั้งผ่าน Admin SDK เท่านั้น — client ไม่มีทางแก้ค่านี้เอง
-      return isSignedIn() ? request.auth.token.role : 'anonymous';
+      // ต้องใช้ .get(key, default) ไม่ใช่ .role ตรงๆ -- ผู้ใช้ที่ยังไม่มี custom
+      // claim นี้เลย (เช่น anonymous auth ก่อนมีระบบตั้ง role จริง) จะทำให้
+      // request.auth.token.role throw error แทนที่จะ return null อย่างที่คาดไว้
+      // ทำให้ทุก || chain ที่เรียก role() ผ่าน isAdmin()/isTeamOrAdmin() พังไปด้วย
+      // แม้ clause หลังๆที่ควรจะอนุญาตอยู่แล้วก็ตาม (เจอบั๊กจริงตอนทดสอบ 2026-08-11
+      // -- ลูกค้า anonymous อ่าน addresses/jobs ของตัวเองไม่ได้เลยเพราะเหตุนี้)
+      return isSignedIn() ? request.auth.token.get('role', 'customer') : 'anonymous';
     }
 
     function isTeamOrAdmin() {
@@ -26,11 +32,19 @@ service cloud.firestore {
     }
 
     // ระดับการมองเห็นตาม recordStatus (rakbaan_md/12-database-structure-front-end.md §1.5.1)
-    function canRead(data) {
+    // -- ต้องส่ง ownerId มาเช็คด้วยเสมอ ไม่ใช่แค่ recordStatus: เดิม (ก่อน 2026-08-11
+    // รอบ 2) ไม่มีการเช็ค ownership เลยในระดับ "signed-in ทั่วไป" ทำให้ลูกค้าคนหนึ่ง
+    // อ่านของลูกค้าคนอื่นที่ recordStatus<=1 ได้หมด ถ้ารู้ doc id หรือ query แบบอื่น
+    function canRead(data, ownerId) {
+      // .get(key, default) แทนการเข้าถึง data.recordStatus ตรงๆ ด้วยเหตุผลเดียวกับ
+      // role() ด้านบน -- list query ยังพังแม้แก้ role() แล้ว เพราะ data.recordStatus
+      // ตรงๆ throw ได้เหมือนกันตอน Firestore ประเมิน rule แบบ speculative สำหรับ
+      // list request (ยืนยันจากการทดสอบจริง 2026-08-11: isSignedIn() เฉยๆผ่าน,
+      // แต่ canRead() เดิมพังแม้ collection ว่างเปล่า)
       return isSuperAdmin()
-        || (isAdmin() && data.recordStatus <= 4)
-        || (isTeamOrAdmin() && data.recordStatus <= 3)
-        || (isSignedIn() && data.recordStatus <= 1);
+        || (isAdmin() && data.get('recordStatus', 0) <= 4)
+        || (isTeamOrAdmin() && data.get('recordStatus', 0) <= 3)
+        || (isSignedIn() && request.auth.uid == ownerId && data.get('recordStatus', 0) <= 1);
     }
 
     // self-delete: เจ้าของเปลี่ยน 0 -> 3 เท่านั้น, lastActorId/Type ต้องตรงกับตัวเอง,
@@ -55,7 +69,7 @@ service cloud.firestore {
 
     // ---------- Group A: users ----------
     match /users/{userId} {
-      allow read: if canRead(resource.data);
+      allow read: if canRead(resource.data, userId);
       allow create: if isSignedIn() && request.auth.uid == userId;
       allow update: if isSelfDeleteTransition(userId)
         || (isSignedIn() && request.auth.uid == userId && !isProtectedStatusWrite())
@@ -65,7 +79,7 @@ service cloud.firestore {
 
     // ---------- Group A: addresses ----------
     match /addresses/{addressId} {
-      allow read: if canRead(resource.data);
+      allow read: if canRead(resource.data, resource.data.userId);
       allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
       allow update: if isSelfDeleteTransition(resource.data.userId)
         || (isSignedIn() && request.auth.uid == resource.data.userId && !isProtectedStatusWrite())
@@ -75,28 +89,40 @@ service cloud.firestore {
 
     // ---------- Group A: jobs (+ sub-collections) ----------
     match /jobs/{jobId} {
-      allow read: if canRead(resource.data);
+      allow read: if canRead(resource.data, resource.data.customerId);
       allow create: if isSignedIn() && request.resource.data.customerId == request.auth.uid;
       allow update: if isSelfDeleteTransition(resource.data.customerId)
         || (isTeamOrAdmin() && !isProtectedStatusWrite());
       allow delete: if false;
 
       match /boq_items/{boqId} {
-        allow read: if canRead(get(/databases/$(database)/documents/jobs/$(jobId)).data);
+        allow read: if canRead(
+          get(/databases/$(database)/documents/jobs/$(jobId)).data,
+          get(/databases/$(database)/documents/jobs/$(jobId)).data.customerId
+        );
         allow write: if isTeamOrAdmin() && !isProtectedStatusWrite();
       }
       match /milestones/{milestoneId} {
-        allow read: if canRead(get(/databases/$(database)/documents/jobs/$(jobId)).data);
+        allow read: if canRead(
+          get(/databases/$(database)/documents/jobs/$(jobId)).data,
+          get(/databases/$(database)/documents/jobs/$(jobId)).data.customerId
+        );
         allow write: if isTeamOrAdmin() && !isProtectedStatusWrite();
       }
       match /status_history/{historyId} {
         // กลุ่ม C — append-only, เขียนได้จาก Cloud Function (Admin SDK) เท่านั้น
-        allow read: if canRead(get(/databases/$(database)/documents/jobs/$(jobId)).data);
+        allow read: if canRead(
+          get(/databases/$(database)/documents/jobs/$(jobId)).data,
+          get(/databases/$(database)/documents/jobs/$(jobId)).data.customerId
+        );
         allow write: if false;
       }
       match /photos/{photoId} {
         // ดู rakbaan_md/12-database-structure-front-end.md §2.18 job_photos
-        allow read: if canRead(get(/databases/$(database)/documents/jobs/$(jobId)).data);
+        allow read: if canRead(
+          get(/databases/$(database)/documents/jobs/$(jobId)).data,
+          get(/databases/$(database)/documents/jobs/$(jobId)).data.customerId
+        );
         allow create: if isSignedIn() &&
           (get(/databases/$(database)/documents/jobs/$(jobId)).data.customerId == request.auth.uid || isTeamOrAdmin());
         allow update: if isSelfDeleteTransition(resource.data.uploadedBy) || (isTeamOrAdmin() && !isProtectedStatusWrite());
@@ -106,7 +132,7 @@ service cloud.firestore {
 
     // ---------- Group A: chat_sessions (+ messages) ----------
     match /chat_sessions/{sessionId} {
-      allow read: if canRead(resource.data);
+      allow read: if canRead(resource.data, resource.data.userId);
       allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
       allow update: if isSelfDeleteTransition(resource.data.userId)
         || (isTeamOrAdmin() && !isProtectedStatusWrite());
@@ -114,7 +140,8 @@ service cloud.firestore {
 
       match /messages/{messageId} {
         // กลุ่ม C — immutable, ไม่มี recordStatus, ลบทั้ง session แทน
-        allow read: if canRead(get(/databases/$(database)/documents/chat_sessions/$(sessionId)).data);
+        allow read: if isSignedIn() &&
+          (get(/databases/$(database)/documents/chat_sessions/$(sessionId)).data.userId == request.auth.uid || isTeamOrAdmin());
         allow create: if isSignedIn()
           && get(/databases/$(database)/documents/chat_sessions/$(sessionId)).data.userId == request.auth.uid;
         allow update, delete: if false;
@@ -123,28 +150,28 @@ service cloud.firestore {
 
     // ---------- Group A: memberships, reviews, notifications, disputes, escrow_transactions ----------
     match /memberships/{membershipId} {
-      allow read: if canRead(resource.data);
+      allow read: if canRead(resource.data, resource.data.userId);
       allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
       allow update: if isSelfDeleteTransition(resource.data.userId) || (isTeamOrAdmin() && !isProtectedStatusWrite());
       allow delete: if false;
     }
 
     match /reviews/{reviewId} {
-      allow read: if canRead(resource.data);
+      allow read: if canRead(resource.data, resource.data.customerId);
       allow create: if isSignedIn() && request.resource.data.customerId == request.auth.uid;
       allow update: if isSelfDeleteTransition(resource.data.customerId) || (isTeamOrAdmin() && !isProtectedStatusWrite());
       allow delete: if false;
     }
 
     match /notifications/{notificationId} {
-      allow read: if canRead(resource.data);
+      allow read: if canRead(resource.data, resource.data.userId);
       allow create: if isTeamOrAdmin(); // ระบบ/แอดมินสร้างแจ้งเตือน ไม่ใช่ผู้ใช้เอง
       allow update: if isSelfDeleteTransition(resource.data.userId) || (isTeamOrAdmin() && !isProtectedStatusWrite());
       allow delete: if false;
     }
 
     match /disputes/{disputeId} {
-      allow read: if canRead(resource.data);
+      allow read: if canRead(resource.data, resource.data.raisedBy);
       allow create: if isSignedIn() && request.resource.data.raisedBy == request.auth.uid;
       allow update: if isTeamOrAdmin() && !isProtectedStatusWrite(); // ลูกค้าเปิดเคสได้ แต่ปิด/แก้สถานะเองไม่ได้
       allow delete: if false;
@@ -152,7 +179,7 @@ service cloud.firestore {
 
     match /escrow_transactions/{transactionId} {
       // การเงิน — client อ่านได้เท่านั้น ห้ามเขียน/แก้เองแม้แต่ self-delete
-      allow read: if canRead(resource.data) && resource.data.customerId == request.auth.uid || isTeamOrAdmin();
+      allow read: if canRead(resource.data, resource.data.customerId) || isTeamOrAdmin();
       allow write: if false; // เขียนได้จาก Cloud Function (Admin SDK, เชื่อม PG webhook) เท่านั้น
     }
 
