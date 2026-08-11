@@ -5,19 +5,7 @@ import 'job_repository.dart';
 /// rakbaan_md/02-app-features-ui.md so the prototype screens look like the
 /// mockups without touching a real backend yet.
 class MockJobRepository implements JobRepository {
-  static const _categories = [
-    ServiceCategory(id: 'plumbing', name: 'ประปา', icon: '🚰'),
-    ServiceCategory(id: 'electrical', name: 'ไฟฟ้า', icon: '⚡'),
-    ServiceCategory(id: 'aircon', name: 'แอร์', icon: '❄️'),
-    ServiceCategory(id: 'structure', name: 'โครงสร้าง', icon: '🧱'),
-    ServiceCategory(id: 'other', name: 'อื่นๆ', icon: '🔧'),
-    ServiceCategory(
-      id: 'emergency',
-      name: 'งานฉุกเฉิน 24 ชม.',
-      icon: '🚨',
-      isEmergency: true,
-    ),
-  ];
+  static const _categories = HomeRepairCategories.all;
 
   static const _addresses = [
     ServiceAddress(
@@ -43,7 +31,7 @@ class MockJobRepository implements JobRepository {
   Job _activeJob = Job(
     id: 'job-24071',
     jobNumber: '#RB-24071',
-    category: _categories[1],
+    category: _categories[0], // electrical
     address: _addresses[0],
     status: JobStatus.enRoute,
     priceMin: 1150,
@@ -57,7 +45,7 @@ class MockJobRepository implements JobRepository {
     Job(
       id: 'job-23980',
       jobNumber: '#RB-23980',
-      category: _categories[0],
+      category: _categories[1], // plumbing
       address: _addresses[0],
       status: JobStatus.completed,
       priceMin: 800,
@@ -70,7 +58,7 @@ class MockJobRepository implements JobRepository {
     Job(
       id: 'job-23711',
       jobNumber: '#RB-23711',
-      category: _categories[2],
+      category: _categories[2], // air_con
       address: _addresses[1],
       status: JobStatus.completed,
       priceMin: 1200,
@@ -95,11 +83,11 @@ class MockJobRepository implements JobRepository {
   List<Job> getJobHistory() => List.unmodifiable(_history);
 
   @override
-  Job createJob({
+  Future<Job> createJob({
     required ServiceCategory category,
     required ServiceAddress address,
     required String description,
-  }) {
+  }) async {
     _activeJob = Job(
       id: 'job-${DateTime.now().millisecondsSinceEpoch}',
       jobNumber: '#RB-${10000 + _history.length}',
@@ -126,4 +114,12 @@ class MockJobRepository implements JobRepository {
     );
     return _activeJob;
   }
+
+  // Mock data only ever changes through the direct calls above, which the
+  // UI already awaits synchronously -- nothing to emit here.
+  @override
+  Stream<void> get changes => const Stream.empty();
+
+  @override
+  void dispose() {}
 }

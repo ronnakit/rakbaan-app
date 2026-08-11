@@ -3,8 +3,8 @@ import 'package:go_router/go_router.dart';
 
 import '../core/design_tokens.dart';
 import '../models/job.dart';
+import '../screens/chat_screen.dart';
 import '../screens/home_screen.dart';
-import '../screens/model_setup_screen.dart';
 import '../screens/profile_screen.dart';
 import '../screens/report_job_screen.dart';
 import '../screens/report_job_confirm_screen.dart';
@@ -59,7 +59,7 @@ final appRouter = GoRouter(
         ),
         StatefulShellBranch(
           routes: [
-            GoRoute(path: '/chat', builder: (_, _) => const ModelSetupScreen()),
+            GoRoute(path: '/chat', builder: (_, _) => const ChatScreen()),
           ],
         ),
         StatefulShellBranch(

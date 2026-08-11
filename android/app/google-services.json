@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "41492967250",
+    "project_id": "rakbaan-cnx",
+    "storage_bucket": "rakbaan-cnx.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:41492967250:android:a2859178c045238e69948b",
+        "android_client_info": {
+          "package_name": "com.rakbaan"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyANpl4EHzMTnprMVvEVDms2u6TuGy52Mhs"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

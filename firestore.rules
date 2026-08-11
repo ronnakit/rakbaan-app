@@ -1,0 +1,175 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ---------- Helper functions ----------
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function role() {
+      // custom claim ต้องตั้งผ่าน Admin SDK เท่านั้น — client ไม่มีทางแก้ค่านี้เอง
+      return isSignedIn() ? request.auth.token.role : 'anonymous';
+    }
+
+    function isTeamOrAdmin() {
+      return role() == 'team' || role() == 'admin' || role() == 'super_admin';
+    }
+
+    function isAdmin() {
+      return role() == 'admin' || role() == 'super_admin';
+    }
+
+    function isSuperAdmin() {
+      return role() == 'super_admin';
+    }
+
+    // ระดับการมองเห็นตาม recordStatus (rakbaan_md/12-database-structure-front-end.md §1.5.1)
+    function canRead(data) {
+      return isSuperAdmin()
+        || (isAdmin() && data.recordStatus <= 4)
+        || (isTeamOrAdmin() && data.recordStatus <= 3)
+        || (isSignedIn() && data.recordStatus <= 1);
+    }
+
+    // self-delete: เจ้าของเปลี่ยน 0 -> 3 เท่านั้น, lastActorId/Type ต้องตรงกับตัวเอง,
+    // ห้ามแก้ field อื่นในทรานแซกชันเดียวกัน (ป้องกันการแอบเปลี่ยนข้อมูลพร้อมลบ)
+    function isSelfDeleteTransition(ownerId) {
+      return isSignedIn()
+        && request.auth.uid == ownerId
+        && resource.data.recordStatus == 0
+        && request.resource.data.recordStatus == 3
+        && request.resource.data.lastActorId == request.auth.uid
+        && request.resource.data.lastActorType == 'customer'
+        && request.resource.data.diff(resource.data).affectedKeys()
+             .hasOnly(['recordStatus', 'lastActorId', 'lastActorType']);
+    }
+
+    // ปฏิเสธการเขียน recordStatus ตรงจาก client ทุกกรณี ยกเว้น self-delete (0->3)
+    // — transition อื่นทั้งหมดต้องผ่าน Cloud Function (Admin SDK bypass rules อยู่แล้ว)
+    function isProtectedStatusWrite() {
+      return request.resource.data.recordStatus != resource.data.recordStatus
+        && !(resource.data.recordStatus == 0 && request.resource.data.recordStatus == 3);
+    }
+
+    // ---------- Group A: users ----------
+    match /users/{userId} {
+      allow read: if canRead(resource.data);
+      allow create: if isSignedIn() && request.auth.uid == userId;
+      allow update: if isSelfDeleteTransition(userId)
+        || (isSignedIn() && request.auth.uid == userId && !isProtectedStatusWrite())
+        || (isTeamOrAdmin() && !isProtectedStatusWrite());
+      allow delete: if false; // ห้าม hard-delete จาก client เด็ดขาด
+    }
+
+    // ---------- Group A: addresses ----------
+    match /addresses/{addressId} {
+      allow read: if canRead(resource.data);
+      allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
+      allow update: if isSelfDeleteTransition(resource.data.userId)
+        || (isSignedIn() && request.auth.uid == resource.data.userId && !isProtectedStatusWrite())
+        || (isTeamOrAdmin() && !isProtectedStatusWrite());
+      allow delete: if false;
+    }
+
+    // ---------- Group A: jobs (+ sub-collections) ----------
+    match /jobs/{jobId} {
+      allow read: if canRead(resource.data);
+      allow create: if isSignedIn() && request.resource.data.customerId == request.auth.uid;
+      allow update: if isSelfDeleteTransition(resource.data.customerId)
+        || (isTeamOrAdmin() && !isProtectedStatusWrite());
+      allow delete: if false;
+
+      match /boq_items/{boqId} {
+        allow read: if canRead(get(/databases/$(database)/documents/jobs/$(jobId)).data);
+        allow write: if isTeamOrAdmin() && !isProtectedStatusWrite();
+      }
+      match /milestones/{milestoneId} {
+        allow read: if canRead(get(/databases/$(database)/documents/jobs/$(jobId)).data);
+        allow write: if isTeamOrAdmin() && !isProtectedStatusWrite();
+      }
+      match /status_history/{historyId} {
+        // กลุ่ม C — append-only, เขียนได้จาก Cloud Function (Admin SDK) เท่านั้น
+        allow read: if canRead(get(/databases/$(database)/documents/jobs/$(jobId)).data);
+        allow write: if false;
+      }
+      match /photos/{photoId} {
+        // ดู rakbaan_md/12-database-structure-front-end.md §2.18 job_photos
+        allow read: if canRead(get(/databases/$(database)/documents/jobs/$(jobId)).data);
+        allow create: if isSignedIn() &&
+          (get(/databases/$(database)/documents/jobs/$(jobId)).data.customerId == request.auth.uid || isTeamOrAdmin());
+        allow update: if isSelfDeleteTransition(resource.data.uploadedBy) || (isTeamOrAdmin() && !isProtectedStatusWrite());
+        allow delete: if false;
+      }
+    }
+
+    // ---------- Group A: chat_sessions (+ messages) ----------
+    match /chat_sessions/{sessionId} {
+      allow read: if canRead(resource.data);
+      allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
+      allow update: if isSelfDeleteTransition(resource.data.userId)
+        || (isTeamOrAdmin() && !isProtectedStatusWrite());
+      allow delete: if false;
+
+      match /messages/{messageId} {
+        // กลุ่ม C — immutable, ไม่มี recordStatus, ลบทั้ง session แทน
+        allow read: if canRead(get(/databases/$(database)/documents/chat_sessions/$(sessionId)).data);
+        allow create: if isSignedIn()
+          && get(/databases/$(database)/documents/chat_sessions/$(sessionId)).data.userId == request.auth.uid;
+        allow update, delete: if false;
+      }
+    }
+
+    // ---------- Group A: memberships, reviews, notifications, disputes, escrow_transactions ----------
+    match /memberships/{membershipId} {
+      allow read: if canRead(resource.data);
+      allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
+      allow update: if isSelfDeleteTransition(resource.data.userId) || (isTeamOrAdmin() && !isProtectedStatusWrite());
+      allow delete: if false;
+    }
+
+    match /reviews/{reviewId} {
+      allow read: if canRead(resource.data);
+      allow create: if isSignedIn() && request.resource.data.customerId == request.auth.uid;
+      allow update: if isSelfDeleteTransition(resource.data.customerId) || (isTeamOrAdmin() && !isProtectedStatusWrite());
+      allow delete: if false;
+    }
+
+    match /notifications/{notificationId} {
+      allow read: if canRead(resource.data);
+      allow create: if isTeamOrAdmin(); // ระบบ/แอดมินสร้างแจ้งเตือน ไม่ใช่ผู้ใช้เอง
+      allow update: if isSelfDeleteTransition(resource.data.userId) || (isTeamOrAdmin() && !isProtectedStatusWrite());
+      allow delete: if false;
+    }
+
+    match /disputes/{disputeId} {
+      allow read: if canRead(resource.data);
+      allow create: if isSignedIn() && request.resource.data.raisedBy == request.auth.uid;
+      allow update: if isTeamOrAdmin() && !isProtectedStatusWrite(); // ลูกค้าเปิดเคสได้ แต่ปิด/แก้สถานะเองไม่ได้
+      allow delete: if false;
+    }
+
+    match /escrow_transactions/{transactionId} {
+      // การเงิน — client อ่านได้เท่านั้น ห้ามเขียน/แก้เองแม้แต่ self-delete
+      allow read: if canRead(resource.data) && resource.data.customerId == request.auth.uid || isTeamOrAdmin();
+      allow write: if false; // เขียนได้จาก Cloud Function (Admin SDK, เชื่อม PG webhook) เท่านั้น
+    }
+
+    // ---------- Group B: master/reference data (ไม่มี recordStatus) ----------
+    match /price_lists/{itemId}  { allow read: if true; allow write: if isAdmin(); }
+    match /promotions/{promoId}  { allow read: if true; allow write: if isAdmin(); }
+    match /cost_codes/{codeId}   { allow read: if isTeamOrAdmin(); allow write: if isAdmin(); }
+
+    // ---------- Group C: immutable audit trail ----------
+    match /consent_logs/{consentId} {
+      allow read: if isSignedIn() && (resource.data.userId == request.auth.uid || isAdmin());
+      allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
+      allow update, delete: if false;
+    }
+    match /user_activity_logs/{logId}   { allow read: if isAdmin(); allow write: if false; }
+    match /revenue_transactions/{txId}  { allow read: if isAdmin(); allow write: if false; }
+    match /audit_logs/{logId}           { allow read: if isAdmin(); allow write: if false; }
+    match /database_edit_log/{logId}    { allow read: if isAdmin(); allow write: if false; }
+  }
+}

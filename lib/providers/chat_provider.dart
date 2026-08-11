@@ -3,29 +3,29 @@ import 'package:flutter/foundation.dart';
 import '../core/persona.dart';
 import '../models/chat_message.dart';
 import '../services/domain_filter_service.dart';
-import '../services/llama_chat_service.dart';
-import '../services/model_manager_service.dart';
 
-enum ModelLoadStatus { notStarted, downloading, ready, error }
-
-/// Owns the chat transcript and orchestrates: domain filter -> model call ->
-/// streaming UI updates. This is the only class the UI talks to.
+/// Owns the chat transcript and applies the Layer-0 domain filter before any
+/// answer is produced.
+///
+/// The on-device LLM call that used to live here (fllama/llama.cpp running a
+/// fine-tuned Gemma 3 270M) was removed on 2026-08-11 after the model
+/// architecture pivoted to the Cascading 3-Tier design (Tier 1 hard-coded
+/// lookup -> Tier 2 Firestore knowledge base -> Tier 3 external cloud API --
+/// see rakbaan_md/03-mali-ai-assistant.md §3). None of the 3 tiers are wired
+/// up yet, so on-topic questions currently get a placeholder reply below.
 class ChatProvider extends ChangeNotifier {
-  ChatProvider({ModelManagerService? modelManager})
-      : _modelManager = modelManager ?? ModelManagerService();
+  ChatProvider() {
+    messages.add(
+      ChatMessage(
+        id: _newId(),
+        role: MessageRole.assistant,
+        text: Persona.greeting,
+        fromModel: false,
+      ),
+    );
+  }
 
-  final ModelManagerService _modelManager;
   final DomainFilterService _filter = DomainFilterService();
-  final LlamaChatService _llamaService = LlamaChatService();
-
-  /// How many prior messages to feed back as context. Keeps the prompt well
-  /// under `contextSize` (2048 tokens) without any extra token-counting.
-  static const int _maxHistoryMessages = 6;
-
-  ModelLoadStatus status = ModelLoadStatus.notStarted;
-  double downloadProgress = 0.0;
-  String? errorMessage;
-  String? _modelPath;
 
   final List<ChatMessage> messages = [];
   bool isGenerating = false;
@@ -33,100 +33,54 @@ class ChatProvider extends ChangeNotifier {
   int _idCounter = 0;
   String _newId() => 'msg_${_idCounter++}';
 
-  Future<void> initializeModel() async {
-    status = ModelLoadStatus.downloading;
-    downloadProgress = 0;
-    errorMessage = null;
-    notifyListeners();
-
-    try {
-      final path = await _modelManager.ensureModelPath(
-        onProgress: (progress) {
-          downloadProgress = progress;
-          notifyListeners();
-        },
-      );
-      _modelPath = path;
-      status = ModelLoadStatus.ready;
-      messages.add(
-        ChatMessage(
-          id: _newId(),
-          role: MessageRole.assistant,
-          text: Persona.greeting,
-        ),
-      );
-      notifyListeners();
-    } catch (e) {
-      status = ModelLoadStatus.error;
-      errorMessage = e.toString();
-      notifyListeners();
-    }
-  }
-
   Future<void> sendMessage(String rawText) async {
     final text = rawText.trim();
-    if (text.isEmpty || isGenerating || _modelPath == null) return;
+    if (text.isEmpty || isGenerating) return;
 
     final verdict = _filter.classify(text);
-    final history = _recentHistory();
+    final isOffTopic = verdict == FilterVerdict.offTopic;
+    messages.add(
+      ChatMessage(
+        id: _newId(),
+        role: MessageRole.user,
+        text: text,
+        fromModel: !isOffTopic,
+      ),
+    );
 
-    messages.add(ChatMessage(id: _newId(), role: MessageRole.user, text: text));
-
-    if (verdict == FilterVerdict.offTopic) {
-      // Answered locally -- no LLM call, no battery/latency cost.
+    if (isOffTopic) {
+      // Answered locally -- no model call needed for an off-topic question.
       messages.add(
         ChatMessage(
           id: _newId(),
           role: MessageRole.assistant,
           text: Persona.offTopicReply,
+          fromModel: false,
         ),
       );
       notifyListeners();
       return;
     }
 
-    final assistantMessage = ChatMessage(
-      id: _newId(),
-      role: MessageRole.assistant,
-      text: '',
-      isStreaming: true,
+    // TODO(cascade): Tier 1/2/3 not implemented yet (see
+    // rakbaan_md/03-mali-ai-assistant.md §3-§5). Placeholder reply keeps the
+    // chat screen usable in the meantime, pointing back to the "แจ้งซ่อม" flow
+    // which already works end-to-end against MockJobRepository.
+    messages.add(
+      ChatMessage(
+        id: _newId(),
+        role: MessageRole.assistant,
+        text: 'ขอบคุณสำหรับคำถามค่ะ ตอนนี้มะลิกำลังปรับปรุงระบบตอบคำถามใหม่อยู่ '
+            'ลองใช้เมนู "แจ้งซ่อม" ด้านล่างเพื่อสร้างใบแจ้งซ่อมได้เลยนะคะ',
+        fromModel: false,
+      ),
     );
-    messages.add(assistantMessage);
-    isGenerating = true;
     notifyListeners();
-
-    try {
-      await for (final partialText in _llamaService.sendMessage(
-        modelPath: _modelPath!,
-        history: history,
-        userMessage: text,
-      )) {
-        assistantMessage.text = partialText;
-        notifyListeners();
-      }
-    } catch (e) {
-      assistantMessage.text =
-          'ขอโทษค่ะ เกิดข้อผิดพลาดระหว่างประมวลผลคำถาม ลองใหม่อีกครั้งนะคะ';
-    } finally {
-      assistantMessage.isStreaming = false;
-      isGenerating = false;
-      notifyListeners();
-    }
   }
 
   void cancelGeneration() {
-    _llamaService.cancelActive();
-  }
-
-  List<ChatMessage> _recentHistory() {
-    final completedTurns = messages.where((m) => !m.isStreaming).toList();
-    if (completedTurns.length <= _maxHistoryMessages) return completedTurns;
-    return completedTurns.sublist(completedTurns.length - _maxHistoryMessages);
-  }
-
-  @override
-  void dispose() {
-    _llamaService.cancelActive();
-    super.dispose();
+    // No-op for now -- there is no in-flight model generation to cancel
+    // since Tier 1-3 aren't wired up yet. Kept so ChatScreen's stop button
+    // doesn't need special-casing.
   }
 }

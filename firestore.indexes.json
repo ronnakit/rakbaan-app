@@ -1,0 +1,59 @@
+{
+  "indexes": [
+    { "collectionGroup": "jobs", "queryScope": "COLLECTION", "fields": [
+      { "fieldPath": "customerId", "order": "ASCENDING" },
+      { "fieldPath": "status", "order": "ASCENDING" },
+      { "fieldPath": "createdAt", "order": "DESCENDING" }
+    ]},
+    { "collectionGroup": "jobs", "queryScope": "COLLECTION", "fields": [
+      { "fieldPath": "customerId", "order": "ASCENDING" },
+      { "fieldPath": "createdAt", "order": "DESCENDING" }
+    ]},
+    { "collectionGroup": "jobs", "queryScope": "COLLECTION", "fields": [
+      { "fieldPath": "assignedTeamId", "order": "ASCENDING" },
+      { "fieldPath": "status", "order": "ASCENDING" },
+      { "fieldPath": "createdAt", "order": "DESCENDING" }
+    ]},
+    { "collectionGroup": "jobs", "queryScope": "COLLECTION", "fields": [
+      { "fieldPath": "category", "order": "ASCENDING" },
+      { "fieldPath": "status", "order": "ASCENDING" },
+      { "fieldPath": "createdAt", "order": "DESCENDING" }
+    ]},
+    { "collectionGroup": "reviews", "queryScope": "COLLECTION", "fields": [
+      { "fieldPath": "technicianId", "order": "ASCENDING" },
+      { "fieldPath": "createdAt", "order": "DESCENDING" }
+    ]},
+    { "collectionGroup": "notifications", "queryScope": "COLLECTION", "fields": [
+      { "fieldPath": "userId", "order": "ASCENDING" },
+      { "fieldPath": "isRead", "order": "ASCENDING" },
+      { "fieldPath": "createdAt", "order": "DESCENDING" }
+    ]},
+    { "collectionGroup": "chat_sessions", "queryScope": "COLLECTION", "fields": [
+      { "fieldPath": "userId", "order": "ASCENDING" },
+      { "fieldPath": "lastMessageAt", "order": "DESCENDING" }
+    ]},
+    { "collectionGroup": "disputes", "queryScope": "COLLECTION", "fields": [
+      { "fieldPath": "jobId", "order": "ASCENDING" },
+      { "fieldPath": "status", "order": "ASCENDING" }
+    ]},
+    { "collectionGroup": "escrow_transactions", "queryScope": "COLLECTION", "fields": [
+      { "fieldPath": "jobId", "order": "ASCENDING" },
+      { "fieldPath": "status", "order": "ASCENDING" }
+    ]},
+    { "collectionGroup": "database_edit_log", "queryScope": "COLLECTION", "fields": [
+      { "fieldPath": "targetCollection", "order": "ASCENDING" },
+      { "fieldPath": "targetDocId", "order": "ASCENDING" },
+      { "fieldPath": "newStatus", "order": "ASCENDING" },
+      { "fieldPath": "timestamp", "order": "DESCENDING" }
+    ]},
+    { "collectionGroup": "database_edit_log", "queryScope": "COLLECTION", "fields": [
+      { "fieldPath": "actorId", "order": "ASCENDING" },
+      { "fieldPath": "timestamp", "order": "DESCENDING" }
+    ]},
+    { "collectionGroup": "audit_logs", "queryScope": "COLLECTION", "fields": [
+      { "fieldPath": "targetUserId", "order": "ASCENDING" },
+      { "fieldPath": "timestamp", "order": "DESCENDING" }
+    ]}
+  ],
+  "fieldOverrides": []
+}

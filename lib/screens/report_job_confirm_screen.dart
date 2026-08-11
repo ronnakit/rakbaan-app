@@ -56,13 +56,13 @@ class ReportJobConfirmScreen extends StatelessWidget {
                 const _PaymentMethodTile(label: 'บัตรเครดิต/เดบิต', icon: Icons.credit_card),
                 const SizedBox(height: AppSpacing.s6),
                 FilledButton(
-                  onPressed: () {
-                    context.read<JobProvider>().createJob(
+                  onPressed: () async {
+                    await context.read<JobProvider>().createJob(
                           category: draft!.category,
                           address: draft!.address,
                           description: draft!.description,
                         );
-                    context.go('/tracking');
+                    if (context.mounted) context.go('/tracking');
                   },
                   child: const Text('ยืนยันและล็อกคิวงาน'),
                 ),
