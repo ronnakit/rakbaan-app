@@ -59,6 +59,7 @@ dependencies:
   # enough to satisfy `request.auth != null` in firestore.rules and get a
   # stable uid for `jobs.customerId`, but is NOT a real customer identity.
   firebase_auth: ^6.1.1
+  geolocator: ^14.0.3
 
 dev_dependencies:
   flutter_test:

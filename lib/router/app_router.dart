@@ -3,6 +3,7 @@ import 'package:go_router/go_router.dart';
 
 import '../core/design_tokens.dart';
 import '../models/job.dart';
+import '../screens/address_form_screen.dart';
 import '../screens/chat_screen.dart';
 import '../screens/home_screen.dart';
 import '../screens/profile_screen.dart';
@@ -18,6 +19,16 @@ import '../screens/tracking_screen.dart';
 final appRouter = GoRouter(
   initialLocation: '/home',
   routes: [
+    // Outside the bottom-nav shell (full-screen, no tab bar) so it can be
+    // pushed from either the profile tab or the report-job flow.
+    GoRoute(
+      path: '/address/new',
+      builder: (_, _) => const AddressFormScreen(),
+    ),
+    GoRoute(
+      path: '/address/edit',
+      builder: (_, state) => AddressFormScreen(existing: state.extra as ServiceAddress?),
+    ),
     StatefulShellRoute.indexedStack(
       builder: (context, state, navigationShell) =>
           _MainShell(navigationShell: navigationShell),

@@ -3,7 +3,9 @@ import 'package:provider/provider.dart';
 
 import '../core/design_tokens.dart';
 import '../models/job.dart';
+import '../models/milestone.dart';
 import '../providers/job_provider.dart';
+import '../widgets/review_dialog.dart';
 
 /// Screens 04-05: live 5-step stepper for the active job (with a "จำลอง"
 /// button standing in for the Firestore realtime listener that will drive
@@ -25,7 +27,10 @@ class TrackingScreen extends StatelessWidget {
           if (activeJob != null) ...[
             _JobHeader(job: activeJob),
             const SizedBox(height: AppSpacing.s4),
-            _StatusStepper(currentStatus: activeJob.status),
+            if (activeJob.jobType == JobType.construction)
+              _MilestoneProgress(milestones: jobs.milestones)
+            else
+              _StatusStepper(currentStatus: activeJob.status),
             const SizedBox(height: AppSpacing.s4),
             if (activeJob.technician != null)
               _TechnicianCard(technician: activeJob.technician!),
@@ -136,6 +141,110 @@ class _StepRow extends StatelessWidget {
   }
 }
 
+/// Summary (progress bar + %) + detail (per-milestone list) for a
+/// [JobType.construction] job -- shown instead of [_StatusStepper], which
+/// only makes sense for the 5-step repair flow. See
+/// rakbaan_md/12-database-structure-front-end.md §2.14.
+class _MilestoneProgress extends StatelessWidget {
+  const _MilestoneProgress({required this.milestones});
+
+  final List<Milestone> milestones;
+
+  @override
+  Widget build(BuildContext context) {
+    if (milestones.isEmpty) {
+      return Container(
+        padding: const EdgeInsets.all(AppSpacing.s4),
+        decoration: BoxDecoration(
+          color: AppColors.pureWhite,
+          borderRadius: BorderRadius.circular(AppRadius.md),
+          boxShadow: AppShadows.sm,
+        ),
+        child: const Text('ยังไม่มีการแบ่งงวดงาน', style: TextStyle(color: AppColors.gray600)),
+      );
+    }
+
+    final totalAmount = milestones.fold<int>(0, (sum, m) => sum + m.amount);
+    final doneAmount = milestones.where((m) => m.status.isDone).fold<int>(0, (sum, m) => sum + m.amount);
+    final doneCount = milestones.where((m) => m.status.isDone).length;
+    final percent = totalAmount > 0 ? doneAmount / totalAmount : 0.0;
+
+    return Container(
+      padding: const EdgeInsets.all(AppSpacing.s4),
+      decoration: BoxDecoration(
+        color: AppColors.pureWhite,
+        borderRadius: BorderRadius.circular(AppRadius.md),
+        boxShadow: AppShadows.sm,
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text('ความคืบหน้างาน', style: Theme.of(context).textTheme.titleMedium),
+              Text('${(percent * 100).round()}%',
+                  style: const TextStyle(color: AppColors.mint700, fontWeight: FontWeight.bold)),
+            ],
+          ),
+          const SizedBox(height: AppSpacing.s2),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(AppRadius.md),
+            child: LinearProgressIndicator(
+              value: percent,
+              minHeight: 8,
+              backgroundColor: AppColors.gray300,
+              color: AppColors.mint500,
+            ),
+          ),
+          const SizedBox(height: AppSpacing.s2),
+          Text(
+            'เสร็จแล้ว $doneCount จาก ${milestones.length} งวด · ปลดล็อกแล้ว $doneAmount จาก $totalAmount บาท',
+            style: Theme.of(context).textTheme.bodySmall,
+          ),
+          const SizedBox(height: AppSpacing.s4),
+          for (final m in milestones) _MilestoneRow(milestone: m),
+        ],
+      ),
+    );
+  }
+}
+
+class _MilestoneRow extends StatelessWidget {
+  const _MilestoneRow({required this.milestone});
+
+  final Milestone milestone;
+
+  @override
+  Widget build(BuildContext context) {
+    final color = milestone.status.isDone ? AppColors.mint500 : AppColors.gray300;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: AppSpacing.s3),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(milestone.status.isDone ? Icons.check_circle : Icons.circle_outlined, color: color, size: 20),
+          const SizedBox(width: AppSpacing.s3),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('งวด ${milestone.sequence}: ${milestone.title}',
+                    style: TextStyle(
+                      fontWeight: milestone.status.isDone ? FontWeight.w600 : FontWeight.normal,
+                      color: AppColors.gray900,
+                    )),
+                Text('${milestone.amount}฿ · ${milestone.status.label}',
+                    style: Theme.of(context).textTheme.bodySmall),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _TechnicianCard extends StatelessWidget {
   const _TechnicianCard({required this.technician});
 
@@ -240,7 +349,19 @@ class _HistoryTile extends StatelessWidget {
               ],
             ),
           ),
-          OutlinedButton(onPressed: () {}, child: const Text('เรียกช่างคนเดิม')),
+          IntrinsicWidth(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                OutlinedButton(onPressed: () {}, child: const Text('เรียกช่างคนเดิม')),
+                if (job.technician != null)
+                  TextButton(
+                    onPressed: () => showReviewSheet(context, job),
+                    child: const Text('ให้คะแนน'),
+                  ),
+              ],
+            ),
+          ),
         ],
       ),
     );

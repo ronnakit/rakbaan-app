@@ -98,6 +98,9 @@ class ServiceAddress {
     required this.id,
     required this.label,
     required this.fullAddress,
+    this.recipientName = '',
+    this.phone = '',
+    this.isDefault = false,
     this.lat,
     this.lng,
   });
@@ -105,10 +108,15 @@ class ServiceAddress {
   final String id;
   final String label; // e.g. "บ้านหลัก", "คอนโด"
   final String fullAddress;
+  final String recipientName;
+  final String phone;
+  final bool isDefault;
 
   /// GPS coordinates for Zone Fee calculation
-  /// (rakbaan_md/12-database-structure-front-end.md §2.2) -- null until the
-  /// address form grows a real map/location picker (not built yet).
+  /// (rakbaan_md/12-database-structure-front-end.md §2.2) -- null until
+  /// filled via the "ใช้ตำแหน่งปัจจุบัน" button (device GPS through
+  /// `geolocator`) -- no interactive map picker yet (would need Google Maps
+  /// Platform API key/billing, see rakbaan_md/07-technical-requirements.md §1.3).
   final double? lat;
   final double? lng;
 }

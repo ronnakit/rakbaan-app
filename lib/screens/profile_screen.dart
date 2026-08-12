@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
 import 'package:provider/provider.dart';
 
 import '../core/design_tokens.dart';
@@ -23,13 +24,31 @@ class ProfileScreen extends StatelessWidget {
           const SizedBox(height: AppSpacing.s6),
           _SectionLabel('ที่อยู่ของฉัน'),
           for (final address in addresses)
-            ListTile(
-              tileColor: AppColors.pureWhite,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadius.md)),
-              leading: const Icon(Icons.home_outlined, color: AppColors.navy700),
-              title: Text(address.label),
-              subtitle: Text(address.fullAddress),
+            Padding(
+              padding: const EdgeInsets.only(bottom: AppSpacing.s2),
+              child: ListTile(
+                tileColor: AppColors.pureWhite,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadius.md)),
+                leading: const Icon(Icons.home_outlined, color: AppColors.navy700),
+                title: Row(
+                  children: [
+                    Text(address.label),
+                    if (address.isDefault) ...[
+                      const SizedBox(width: AppSpacing.s2),
+                      const Text('· หลัก', style: TextStyle(color: AppColors.mint700, fontSize: 12)),
+                    ],
+                  ],
+                ),
+                subtitle: Text(address.fullAddress),
+                trailing: const Icon(Icons.chevron_right),
+                onTap: () => context.push('/address/edit', extra: address),
+              ),
             ),
+          OutlinedButton.icon(
+            onPressed: () => context.push('/address/new'),
+            icon: const Icon(Icons.add),
+            label: const Text('เพิ่มที่อยู่ใหม่'),
+          ),
           const SizedBox(height: AppSpacing.s6),
           _SectionLabel('วิธีการชำระเงิน'),
           const ListTile(

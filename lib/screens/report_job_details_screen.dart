@@ -65,22 +65,38 @@ class _ReportJobDetailsScreenState extends State<ReportJobDetailsScreen> {
           const SizedBox(height: AppSpacing.s6),
           Text('เลือกที่อยู่', style: Theme.of(context).textTheme.bodyMedium),
           const SizedBox(height: AppSpacing.s2),
-          RadioGroup<ServiceAddress>(
-            groupValue: _selectedAddress,
-            onChanged: (value) => setState(() => _selectedAddress = value),
-            child: Column(
-              children: [
-                for (final address in addresses)
-                  RadioListTile<ServiceAddress>(
-                    value: address,
-                    title: Text(address.label),
-                    subtitle: Text(address.fullAddress),
-                    tileColor: AppColors.pureWhite,
-                    contentPadding:
-                        const EdgeInsets.symmetric(horizontal: AppSpacing.s2),
-                  ),
-              ],
+          if (addresses.isEmpty)
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: AppSpacing.s2),
+              child: Text('ยังไม่มีที่อยู่ — กดเพิ่มที่อยู่ใหม่ก่อนแจ้งซ่อมได้เลย',
+                  style: TextStyle(color: AppColors.gray600)),
+            )
+          else
+            RadioGroup<ServiceAddress>(
+              groupValue: _selectedAddress,
+              onChanged: (value) => setState(() => _selectedAddress = value),
+              child: Column(
+                children: [
+                  for (final address in addresses)
+                    RadioListTile<ServiceAddress>(
+                      value: address,
+                      title: Text(address.label),
+                      subtitle: Text(address.fullAddress),
+                      tileColor: AppColors.pureWhite,
+                      contentPadding:
+                          const EdgeInsets.symmetric(horizontal: AppSpacing.s2),
+                    ),
+                ],
+              ),
             ),
+          const SizedBox(height: AppSpacing.s2),
+          OutlinedButton.icon(
+            onPressed: () async {
+              final created = await context.push<ServiceAddress>('/address/new');
+              if (created != null) setState(() => _selectedAddress = created);
+            },
+            icon: const Icon(Icons.add),
+            label: const Text('เพิ่มที่อยู่ใหม่'),
           ),
           const SizedBox(height: AppSpacing.s6),
           FilledButton(

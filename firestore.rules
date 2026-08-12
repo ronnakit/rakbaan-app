@@ -67,6 +67,28 @@ service cloud.firestore {
         && !(resource.data.recordStatus == 0 && request.resource.data.recordStatus == 3);
     }
 
+    // milestones v3 (2026-08-12) -- ลูกค้าทำเครื่องหมาย "อ่านแล้ว" งวดงานได้ ไม่จำกัดสถานะ
+    // (การดูข้อมูลตัวเองไม่มีความเสี่ยง) แต่ต้องแก้แค่ readAt field เดียวเท่านั้น
+    function isCustomerMilestoneRead(jobCustomerId) {
+      return isSignedIn()
+        && request.auth.uid == jobCustomerId
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['readAt']);
+    }
+
+    // milestones v3 (2026-08-12) -- ลูกค้ายืนยันรับงวดงาน: completed -> approved เท่านั้น
+    // (ห้าม approve งวดที่ช่างยังไม่แจ้งเสร็จ) พร้อม remark ของตัวเอง lastActorId/Type ต้อง
+    // เป็นของตัวเองเสมอ (เหมือน isSelfDeleteTransition) ห้ามแก้ amount/retention/ฟิลด์อื่นแอบไปด้วย
+    function isCustomerMilestoneConfirm(jobCustomerId) {
+      return isSignedIn()
+        && request.auth.uid == jobCustomerId
+        && resource.data.status == 'completed'
+        && request.resource.data.status == 'approved'
+        && request.resource.data.lastActorId == request.auth.uid
+        && request.resource.data.lastActorType == 'customer'
+        && request.resource.data.diff(resource.data).affectedKeys()
+             .hasOnly(['status', 'approvedAt', 'customerRemark', 'lastActorId', 'lastActorType']);
+    }
+
     // ---------- Group A: users ----------
     match /users/{userId} {
       allow read: if canRead(resource.data, userId);
@@ -107,7 +129,18 @@ service cloud.firestore {
           get(/databases/$(database)/documents/jobs/$(jobId)).data,
           get(/databases/$(database)/documents/jobs/$(jobId)).data.customerId
         );
-        allow write: if isTeamOrAdmin() && !isProtectedStatusWrite();
+        allow create: if isTeamOrAdmin() && !isProtectedStatusWrite();
+        // v3 (2026-08-12): ลูกค้าเขียนได้ 2 ทางแบบจำกัดมากเท่านั้น -- (1) ทำเครื่องหมาย
+        // "อ่านแล้ว" (2) ยืนยันรับงวดงาน (completed -> approved) พร้อม remark ของตัวเอง
+        // ทุก field อื่น (amount/retention/startedAt/technicianRemark ฯลฯ) ยังเขียนได้แค่ team/admin เท่านั้น
+        allow update: if isCustomerMilestoneRead(
+            get(/databases/$(database)/documents/jobs/$(jobId)).data.customerId
+          )
+          || isCustomerMilestoneConfirm(
+            get(/databases/$(database)/documents/jobs/$(jobId)).data.customerId
+          )
+          || (isTeamOrAdmin() && !isProtectedStatusWrite());
+        allow delete: if false;
       }
       match /status_history/{historyId} {
         // กลุ่ม C — append-only, เขียนได้จาก Cloud Function (Admin SDK) เท่านั้น
@@ -156,10 +189,27 @@ service cloud.firestore {
       allow delete: if false;
     }
 
+    // v2.1 (2026-08-12): ให้คะแนนได้ 2 ทาง (raterRole = 'customer' | 'technician')
+    // reviewId ต้องเป็น "{jobId}_{raterRole}" เสมอ -- บังคับให้คะแนนได้ครั้งเดียวต่องาน
+    // ต่อทิศทางโดยไม่ต้อง query ก่อนเขียน: ถ้า doc นี้มีอยู่แล้ว การเขียนซ้ำจะถูกตีความเป็น
+    // "update" (ไม่ใช่ "create") ซึ่ง allow update ด้านล่างไม่อนุญาตให้ resubmit เอง จึงติดอัตโนมัติ
+    // ⚠️ ข้อจำกัดที่รู้ตัว: customerId/technicianId เชื่อค่าที่ client ส่งมาตรงๆ ไม่ได้ cross-check
+    // กับ jobs.assignedTeamId เพราะยังไม่มีระบบยืนยันตัวช่างรายบุคคล (ทีมช่าง vs ช่างคนเดียว
+    // ยังไม่ได้ออกแบบ -- รอเว็บ Ops-Portal) เหมือนกับฝั่งลูกค้าเดิมที่ก็ไม่เคย cross-check เช่นกัน
     match /reviews/{reviewId} {
-      allow read: if canRead(resource.data, resource.data.customerId);
-      allow create: if isSignedIn() && request.resource.data.customerId == request.auth.uid;
-      allow update: if isSelfDeleteTransition(resource.data.customerId) || (isTeamOrAdmin() && !isProtectedStatusWrite());
+      allow read: if canRead(resource.data, resource.data.customerId)
+        || canRead(resource.data, resource.data.technicianId);
+      allow create: if isSignedIn()
+        && request.resource.data.raterRole in ['customer', 'technician']
+        && reviewId == request.resource.data.jobId + '_' + request.resource.data.raterRole
+        && (
+          (request.resource.data.raterRole == 'customer' && request.resource.data.customerId == request.auth.uid)
+          || (request.resource.data.raterRole == 'technician' && request.resource.data.technicianId == request.auth.uid)
+        );
+      allow update: if isSelfDeleteTransition(
+          resource.data.raterRole == 'customer' ? resource.data.customerId : resource.data.technicianId
+        )
+        || (isTeamOrAdmin() && !isProtectedStatusWrite());
       allow delete: if false;
     }
 
